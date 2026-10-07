@@ -273,6 +273,55 @@ ridge(λ, φ) = 0.1 * exp((λ - 2)^2 / 2)
         @test all(≈(value_c * value_d), Array(interior(cd)))
     end
 
+    @testset "AbstractOperation on distinct but equal grids under trace" begin
+        Nz = 4
+        z = collect(range(-1, 0, length = Nz + 1))
+        build_grids = (
+            "RectilinearGrid with an array-valued z" =>
+                () -> RectilinearGrid(arch; size = (2, 2, Nz), x = (0, 1), y = (0, 1), z),
+            "LatitudeLongitudeGrid" =>
+                () -> LatitudeLongitudeGrid(arch; size = (4, 4, Nz), longitude = (0, 360), latitude = (-60, 60), z = (0, 1)),
+        )
+
+        for (name, build_grid) in build_grids
+            @testset "$name" begin
+                # `validate_grid` short-circuits on `===`, so only fields on distinct grid
+                # objects exercise the grid `==`. `deepcopy` of a field also copies its grid.
+                grid₁ = build_grid()
+                grid₂ = build_grid()
+                @test grid₁ !== grid₂
+                @test grid₁ == grid₂
+
+                c = CenterField(grid₁); set!(c, 1)
+                d = CenterField(grid₂); set!(d, 3)
+                e = deepcopy(c); set!(e, 5)
+                @test e.grid !== c.grid
+
+                # `c + d` builds a BinaryOperation -> validate_grid(c, d) -> (c.grid == d.grid).
+                average!(c, d) = (c .= (c + d) / 2; nothing)
+
+                compiled_average! = @compile sync=true average!(c, d)
+                compiled_average!(c, d)
+                @test all(≈(2), Array(interior(c)))
+
+                compiled_average! = @compile sync=true average!(c, e)
+                compiled_average!(c, e)
+                @test all(≈(7/2), Array(interior(c)))
+            end
+        end
+
+        # Outside of tracing, grids are still compared by their node values
+        rectilinear_grid = RectilinearGrid(arch; size = (2, 2, Nz), x = (0, 1), y = (0, 1), z)
+        wider_grid = RectilinearGrid(arch; size = (2, 2, Nz), x = (0, 2), y = (0, 1), z)
+        coarser_grid = RectilinearGrid(arch; size = (2, 2, Nz - 1), x = (0, 1), y = (0, 1), z = z[1:Nz])
+        latitude_longitude_grid = LatitudeLongitudeGrid(arch; size = (2, 2, Nz), longitude = (0, 360), latitude = (-60, 60), z)
+        narrower_latitude_longitude_grid = LatitudeLongitudeGrid(arch; size = (2, 2, Nz), longitude = (0, 180), latitude = (-60, 60), z)
+        @test rectilinear_grid != wider_grid
+        @test rectilinear_grid != coarser_grid
+        @test rectilinear_grid != latitude_longitude_grid
+        @test latitude_longitude_grid != narrower_latitude_longitude_grid
+    end
+
     @testset "set! from a reduced field under trace" begin
         grid = LatitudeLongitudeGrid(arch;
                                      size = (4, 4, 4),

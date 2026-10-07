@@ -3,7 +3,7 @@ module Grids
 export constant_with_arch
 
 using Reactant
-using Reactant: TracedRArray
+using Reactant: TracedRArray, TracedRNumber
 using OffsetArrays
 
 using Oceananigans
@@ -16,7 +16,7 @@ using Oceananigans.ImmersedBoundaries: GridFittedBottom, AbstractImmersedBoundar
 
 import ..OceananigansReactantExt: deconcretize
 import Oceananigans.Grids: LatitudeLongitudeGrid, RectilinearGrid, OrthogonalSphericalShellGrid
-import Oceananigans.Grids: total_length
+import Oceananigans.Grids: total_length, nodes_equal
 import Oceananigans.OrthogonalSphericalShellGrids: RotatedLatitudeLongitudeGrid, TripolarGrid
 import Oceananigans.ImmersedBoundaries: ImmersedBoundaryGrid, materialize_immersed_boundary
 
@@ -42,19 +42,13 @@ const ShardedGrid{FT, TX, TY, TZ} = AbstractGrid{FT, TX, TY, TZ, <:ShardedDistri
 include("serial_grids.jl")
 include("sharded_grids.jl")
 
-const ReactantStateLatitudeLongitudeGrid =
-    LatitudeLongitudeGrid{<:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any,
-                          <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:ReactantState}
+const TracedNodes = AbstractArray{<:TracedRNumber}
 
-# The generic `==(::AbstractGrid, ::AbstractGrid)` compares node *values*
-# (`x1 == x2 && ...`). On a LatitudeLongitudeGrid the coordinate arrays are
-# materialized, so under Reactant they are traced/concrete arrays and that
-# comparison yields a `TracedRNumber{Bool}` that cannot drive the short-circuiting
-# `&&`/`||` used by callers such as `AbstractOperations.validate_grid`. Compare
-# structural metadata instead, which is what equality means for a traced grid.
-function Base.:(==)(grid1::ReactantStateLatitudeLongitudeGrid, grid2::ReactantStateLatitudeLongitudeGrid)
-    return topology(grid1) == topology(grid2) && size(grid1) == size(grid2) && halo_size(grid1) == halo_size(grid2)
-end
+# Comparing traced values yields a `TracedRNumber{Bool}`, which cannot drive the `&&`/`||` of
+# callers such as `validate_grid`. While tracing, grids can only be compared by their structure.
+nodes_equal(nodes1::TracedNodes, nodes2::AbstractArray) = size(nodes1) == size(nodes2)
+nodes_equal(nodes1::AbstractArray, nodes2::TracedNodes) = size(nodes1) == size(nodes2)
+nodes_equal(nodes1::TracedNodes, nodes2::TracedNodes) = size(nodes1) == size(nodes2)
 
 function total_size(grid::ShardedGrid, loc, indices)
     sz = size(grid)
